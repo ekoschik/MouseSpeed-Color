@@ -16,12 +16,39 @@ double maxDelta = 0;
 int steps = 0;
 int averageSpeed = 0;
 
-COLORREF GetAccumulateAvgSpeedColor()
+void PrintText(HDC hdc, RECT rcClient, int percentage)
 {
-    // Calculate the average speed as a percentage of the goal
-    int percentage = max(0, min(100,
-        (int)(((double)averageSpeed / goal) * 100)));
+    WCHAR buf[100];
+#define STR (LPWSTR)&buf
+#define PRINT_TEXT(prc, DT_flags, ...) \
+    wsprintf(STR, __VA_ARGS__); \
+    DrawText(hdc, STR, wcslen(STR), prc, DT_flags);
+#define PRINT_CENTER(prc, ...) PRINT_TEXT(prc, DT_CENTER | DT_VCENTER | DT_SINGLELINE, __VA_ARGS__)
+#define PRINT_LEFT(prc, ...) PRINT_TEXT(prc, DT_LEFT, __VA_ARGS__)
 
+    SetBkMode(hdc, TRANSPARENT);
+    //SetTextColor(hdc, RGB(0, 255, 0));
+
+    static HFONT hfontLarge = CreateFont(
+        45, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, L"TimesNewRoman");
+    static HFONT hfontSmall = CreateFont(
+        15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, L"TimesNewRoman");
+
+    SelectFont(hdc, hfontLarge);
+    PRINT_CENTER(&rcClient, L"%i%%", percentage);
+
+    SelectFont(hdc, hfontSmall);
+    int inc = 15;
+    rcClient.top = rcClient.bottom - (3* inc);
+    rcClient.left += inc;
+
+    PRINT_LEFT(&rcClient, L"average speed: %i (/%i)", averageSpeed, (int)goal);
+    rcClient.top += inc;
+    PRINT_LEFT(&rcClient, L"total distance: %i", (int)distance);
+}
+
+COLORREF GetAvgSpeedColor(int percentage)
+{
     static const COLORREF rgbMin = RGB(0, 0, 255);       // blue
     static const COLORREF rgbMiddle = RGB(255, 255, 0);  // yellow
     static const COLORREF rgbMax = RGB(255, 0, 0);       // red
@@ -42,10 +69,15 @@ void Draw(HDC hdc, HWND hwnd)
 {
     RECT rcClient = {};
     GetClientRect(hwnd, &rcClient);
-    
+
+    // Calculate the average speed as a percentage of the goal
+    int percentage = (int)(((double)averageSpeed / goal) * 100);
+
     // Fill the client area with 'avg speed color'
-    HBRUSH hbr = CreateSolidBrush(GetAccumulateAvgSpeedColor());
+    HBRUSH hbr = CreateSolidBrush(GetAvgSpeedColor(max(0, min(100, percentage))));
     FillRect(hdc, &rcClient, hbr);
+
+    PrintText(hdc, rcClient, percentage);
 }
 
 LRESULT CALLBACK WndProc(
