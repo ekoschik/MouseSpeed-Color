@@ -29,6 +29,21 @@ int averageSpeed = 0;
 RECT rcCloseButton = {};
 bool bHoverCloseButton = false;
 
+COLORREF GetAvgSpeedColor(int percentage)
+{
+    percentage = max(0, min(100, percentage));
+
+    // Condensed down from magic online code... picks a color based on a 1-100 value
+#define CLRMATH(d1,d2,f) (int)(d1 + (d2 - d1) * (double)f)
+    COLORREF c1 = (percentage < 50) ? rgbMin : rgbMiddle;
+    COLORREF c2 = (percentage < 50) ? rgbMiddle : rgbMax;
+    double fraction = (percentage < 50) ?
+        percentage / 50.0 : (percentage - 50) / 50.0;
+    return RGB(CLRMATH((double)GetRValue(c1), (double)GetRValue(c2), fraction),
+               CLRMATH((double)GetGValue(c1), (double)GetGValue(c2), fraction),
+               CLRMATH((double)GetBValue(c1), (double)GetBValue(c2), fraction));
+}
+
 void PrintText(HDC hdc, RECT rcClient, int percentage)
 {
     WCHAR buf[100];
@@ -36,58 +51,54 @@ void PrintText(HDC hdc, RECT rcClient, int percentage)
 #define PRINT_TEXT(prc, DT_flags, ...) \
     wsprintf(STR, __VA_ARGS__); \
     DrawText(hdc, STR, wcslen(STR), prc, DT_flags);
-#define PRINT_CENTER(prc, ...) PRINT_TEXT(prc, DT_CENTER | DT_VCENTER | DT_SINGLELINE, __VA_ARGS__)
+#define PRINT_CENTER(prc, ...) \
+    PRINT_TEXT(prc, DT_CENTER | DT_VCENTER | DT_SINGLELINE, __VA_ARGS__)
 #define PRINT_LEFT(prc, ...) PRINT_TEXT(prc, DT_LEFT, __VA_ARGS__)
 
     SetBkMode(hdc, TRANSPARENT);
-    //SetTextColor(hdc, RGB(0, 255, 0));
 
     static HFONT hfontLarge = CreateFont(
         45, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, L"TimesNewRoman");
     static HFONT hfontSmall = CreateFont(
         20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, L"TimesNewRoman");
-
-    RECT rcTxt = rcClient;
+    
+    // Large text in the center for percentage
 
     SelectFont(hdc, hfontLarge);
+    RECT rcTxt = rcClient;
     PRINT_CENTER(&rcTxt, L"%i%%", percentage);
+    
+    // Small text in bottom right for avg speed and distance
 
     SelectFont(hdc, hfontSmall);
+
     int inc = 20;
-    rcTxt.top = rcTxt.bottom - (3* inc);
+    rcTxt.top = rcTxt.bottom - (3 * inc);
     rcTxt.left += inc;
 
-    PRINT_LEFT(&rcTxt, L"average speed: %i (/%i)", averageSpeed, (int)goal);
+    PRINT_LEFT(&rcTxt, L"average speed: %i", averageSpeed);
     rcTxt.top += inc;
-    PRINT_LEFT(&rcTxt, L"total distance: %i", (int)distance);
+    const int distDivBy = 1000;
+    PRINT_LEFT(&rcTxt, L"total distance: %i (x %i px)",
+        (int)(distance / distDivBy), distDivBy);
+    
+    // Close button
 
     SetRect(&rcTxt, rcClient.right - 80,
-                    rcClient.top + 8,
-                    rcClient.right - 8,
-                    rcClient.top + 8 + 25);
+        rcClient.top + 8,
+        rcClient.right - 8,
+        rcClient.top + 8 + 25);
     CopyRect(&rcCloseButton, &rcTxt);
-
+    
     if (bHoverCloseButton) {
-        static HBRUSH hbrCloseHover = CreateSolidBrush(RGB(66, 244, 212));
+        // Pick a number 30 away from the current percentage to get a sufficiently
+        // different color for the close button compared to the background.
+        HBRUSH hbrCloseHover = CreateSolidBrush(
+            GetAvgSpeedColor((percentage + 30) % 100));
         FillRect(hdc, &rcTxt, hbrCloseHover);
     }
+
     PRINT_CENTER(&rcTxt, L"close");
-
-}
-
-COLORREF GetAvgSpeedColor(int percentage)
-{
-    // Adapted from magic online code...
-    COLORREF c1 = (percentage < 50) ? rgbMin : rgbMiddle;
-    COLORREF c2 = (percentage < 50) ? rgbMiddle : rgbMax;
-    double fraction = (percentage < 50) ?
-        percentage / 50.0 : (percentage - 50) / 50.0;
-
-#define CLRMATH(d1,d2,f) (int)(d1 + (d2 - d1) * (double)f)
-
-    return RGB(CLRMATH((double)GetRValue(c1), (double)GetRValue(c2), fraction),
-               CLRMATH((double)GetGValue(c1), (double)GetGValue(c2), fraction),
-               CLRMATH((double)GetBValue(c1), (double)GetBValue(c2), fraction));
 }
 
 void Draw(HDC hdc, HWND hwnd)
@@ -95,11 +106,11 @@ void Draw(HDC hdc, HWND hwnd)
     RECT rcClient = {};
     GetClientRect(hwnd, &rcClient);
 
-    // Calculate the average speed as a percentage of the goal
+    // Calculate the current average speed as a percentage of the goal
     int percentage = (int)(((double)averageSpeed / goal) * 100);
 
     // Fill the client area with 'avg speed color'
-    HBRUSH hbr = CreateSolidBrush(GetAvgSpeedColor(max(0, min(100, percentage))));
+    HBRUSH hbr = CreateSolidBrush(GetAvgSpeedColor(percentage));
     FillRect(hdc, &rcClient, hbr);
 
     PrintText(hdc, rcClient, percentage);
@@ -241,9 +252,9 @@ bool InitWindow()
 
 void LLNewPos(POINT pt)
 {
-    #define DIST(pt0, pt1) \
+#define DIST(pt0, pt1) \
     sqrt(pow((double)pt1.x - (double)pt0.x, 2) + \
-    pow((double)pt1.y - (double)pt0.y, 2))
+         pow((double)pt1.y - (double)pt0.y, 2))
 
     // Update the total distance traveled
     if (ptPrev.x != 0 || ptPrev.y != 0) {
@@ -257,7 +268,7 @@ void LLNewPos(POINT pt)
     averageSpeed = (int)(distance / ++steps);
 
     // Whenever the average speed changes by .01, repaint the window
-    if ((int)(averageSpeed * 100) != (int)(averagePrev * 100)) {
+    if(abs(averageSpeed - averagePrev) >= .01) {
         InvalidateRect(hwnd, NULL, TRUE);
     }
 }
