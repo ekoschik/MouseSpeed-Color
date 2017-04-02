@@ -8,24 +8,26 @@
 HINSTANCE hInst;
 HHOOK hMouseHook;
 DWORD threadID;
-HWND hwnd;
 
-// Default window size
+// Window info
+HWND hwnd;
 int defCX = 600, defCY = 400;
 int defX = 0, defY = 0;
 
-// Defines color range, and 'top' speed (100% speed)
-const double goal = 300;
+// Define color range
+const double goal = 300; // 'top' speed (100% speed)
 COLORREF rgbMin = RGB(0, 0, 255);       // blue (slowest)
 COLORREF rgbMiddle = RGB(255, 255, 0);  // yellow
 COLORREF rgbMax = RGB(255, 0, 0);       // red (fastest)
 
+// Bookkeeping
 POINT ptPrev = {};
 long double distance = 0;
 double maxDelta = 0;
 int steps = 0;
 int averageSpeed = 0;
 
+// Position and 'hover state' of close button
 RECT rcCloseButton = {};
 bool bHoverCloseButton = false;
 
@@ -67,10 +69,16 @@ void Draw(HDC hdc, HWND hwnd)
 
     SetBkMode(hdc, TRANSPARENT);
 
+#define FONT_NAME   \
+    L"Comic Sans MS"
+    //L"Courier New"
+    //L"Arial Black"
+    //L"Consolas"
+
     static HFONT hfontLarge = CreateFont(
-        45, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, L"Arial");
+        45, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, FONT_NAME);
     static HFONT hfontSmall = CreateFont(
-        20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, L"Arial");
+        20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, FONT_NAME);
 
     // Large text in the center for percentage
 
@@ -103,10 +111,10 @@ void Draw(HDC hdc, HWND hwnd)
     CopyRect(&rcCloseButton, &rcTxt); // Update rcCloseButton for hit test
 
     if (bHoverCloseButton) {
-        // Pick a number 30 away from the current percentage to get a sufficiently
+        // Pick a number 50 away from the current percentage to get a sufficiently
         // different color for the close button compared to the background.
         HBRUSH hbrCloseHover = CreateSolidBrush(
-            GetAvgSpeedColor((percentage + 30) % 100));
+            GetAvgSpeedColor((percentage + 50) % 100));
         FillRect(hdc, &rcTxt, hbrCloseHover);
     }
 
@@ -373,6 +381,7 @@ int APIENTRY wWinMain(
     // Stop worker thread and wait for it to finish
     PostThreadMessage(threadID, WM_QUIT, 0, 0);
     WaitForSingleObject(hthread, INFINITE);
+    
     return 0;
 }
 
