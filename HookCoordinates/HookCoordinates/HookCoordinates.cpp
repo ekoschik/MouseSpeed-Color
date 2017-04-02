@@ -4,11 +4,20 @@
 #include <Windowsx.h>
 #include <cmath>
 #include <float.h>
+
 HHOOK hMouseHook;
 DWORD threadID;
 HWND hwnd;
 
-const double goal = 300; // 'top' average distance per mouse move
+// Default window size
+int defCX = 600, defCY = 400;
+int defX = 500, defY = 500;
+
+// Defines color range, and 'top' speed (100% speed)
+const double goal = 300;
+COLORREF rgbMin = RGB(0, 0, 255);       // blue (slowest)
+COLORREF rgbMiddle = RGB(255, 255, 0);  // yellow
+COLORREF rgbMax = RGB(255, 0, 0);       // red (fastest)
 
 POINT ptPrev = {};
 long double distance = 0;
@@ -49,10 +58,6 @@ void PrintText(HDC hdc, RECT rcClient, int percentage)
 
 COLORREF GetAvgSpeedColor(int percentage)
 {
-    static const COLORREF rgbMin = RGB(0, 0, 255);       // blue
-    static const COLORREF rgbMiddle = RGB(255, 255, 0);  // yellow
-    static const COLORREF rgbMax = RGB(255, 0, 0);       // red
-
     // Adapted from magic online code...
     COLORREF c1 = (percentage < 50) ? rgbMin : rgbMiddle;
     COLORREF c2 = (percentage < 50) ? rgbMiddle : rgbMax;
@@ -60,9 +65,10 @@ COLORREF GetAvgSpeedColor(int percentage)
         percentage / 50.0 : (percentage - 50) / 50.0;
 
 #define CLRMATH(d1,d2,f) (int)(d1 + (d2 - d1) * (double)f)
+
     return RGB(CLRMATH((double)GetRValue(c1), (double)GetRValue(c2), fraction),
-        CLRMATH((double)GetGValue(c1), (double)GetGValue(c2), fraction),
-        CLRMATH((double)GetBValue(c1), (double)GetBValue(c2), fraction));
+               CLRMATH((double)GetGValue(c1), (double)GetGValue(c2), fraction),
+               CLRMATH((double)GetBValue(c1), (double)GetBValue(c2), fraction));
 }
 
 void Draw(HDC hdc, HWND hwnd)
@@ -80,6 +86,37 @@ void Draw(HDC hdc, HWND hwnd)
     PrintText(hdc, rcClient, percentage);
 }
 
+__inline VOID ResizeRectAroundPoint(PRECT prc, UINT cx, UINT cy, POINT pt)
+{
+    prc->left = pt.x - MulDiv(pt.x - prc->left, cx, prc->right - prc->left);
+    prc->top = pt.y - MulDiv(pt.y - prc->top, cy, (prc->bottom - prc->top));
+    prc->right = prc->left + cx;
+    prc->bottom = prc->top + cy;
+}
+
+void GrowShrink(int delta, POINT ptCursor, bool control, bool shift)
+{
+    RECT rcWindow = {};
+    GetWindowRect(hwnd, &rcWindow);
+
+    int cx = rcWindow.right - rcWindow.left;
+    int cy = rcWindow.bottom - rcWindow.top;
+    if (control) cx += delta;
+    if (shift) cy += delta;
+
+    if (PtInRect(&rcWindow, ptCursor)) {
+        ResizeRectAroundPoint(&rcWindow, cx, cy, ptCursor);
+    }
+
+    SetWindowPos(hwnd, 0,
+        rcWindow.left, rcWindow.top,
+        rcWindow.right - rcWindow.left,
+        rcWindow.bottom - rcWindow.top,
+        SWP_FRAMECHANGED);
+
+    InvalidateRect(hwnd, NULL, TRUE);
+}
+
 LRESULT CALLBACK WndProc(
     HWND hwnd,
     UINT message,
@@ -95,6 +132,27 @@ LRESULT CALLBACK WndProc(
         EndPaint(hwnd, &ps);
         break;
     }
+
+    // Let the user drag the window from anywhere
+    case WM_NCHITTEST:
+        return HTCAPTION;
+
+    // Scrolling + control/shift adjust the window's width/height
+    case WM_MOUSEWHEEL:
+        if (GET_KEYSTATE_WPARAM(wParam) & MK_CONTROL ||
+            GET_KEYSTATE_WPARAM(wParam) & MK_SHIFT) {
+            static int accum = 0;
+            accum += GET_WHEEL_DELTA_WPARAM(wParam);
+            if (abs(accum) >= WHEEL_DELTA) {
+                POINT ptCursor = { GET_X_LPARAM(lParam) , GET_Y_LPARAM(lParam) };
+                int speed = 4;
+                GrowShrink((accum > 0) ? speed : -speed, ptCursor,
+                    GET_KEYSTATE_WPARAM(wParam) & MK_CONTROL,
+                    GET_KEYSTATE_WPARAM(wParam) & MK_SHIFT);
+                accum = 0;
+            }
+        }
+        break;
 
     case WM_DESTROY:
         PostQuitMessage(0);
@@ -120,12 +178,11 @@ bool InitWindow(HINSTANCE hinst)
         return false;
     }
 
-    int cx = 400, cy = 500;
     hwnd = CreateWindowEx(0,
         szWndClass,
         szWndTitle,
-        WS_OVERLAPPEDWINDOW /*^ WS_THICKFRAME*/,
-        CW_USEDEFAULT, CW_USEDEFAULT, cx, cy,
+        WS_POPUPWINDOW,
+        500,500, defCX, defCY,
         NULL, nullptr, hinst, nullptr);
 
     if (!hwnd) {
@@ -185,7 +242,6 @@ DWORD WINAPI LLMouseHookThread(void* /*data*/)
     }
 
     UnhookWindowsHookEx(hMouseHook);
-    printf("worker thread exiting.\n");
     return 0;
 }
 
@@ -211,7 +267,7 @@ int main()
     PostThreadMessage(threadID, WM_QUIT, 0, 0);
     WaitForSingleObject(hthread, INFINITE);
 
-    printf("exiting. Total distance traveled: %.0Lf\n", distance);
+    printf("exiting, total distance traveled: %.0Lf px\n", distance);
     return 0;
 }
 
