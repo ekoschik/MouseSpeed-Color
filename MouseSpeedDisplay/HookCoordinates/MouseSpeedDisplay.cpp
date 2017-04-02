@@ -257,6 +257,7 @@ void LLNewPos(POINT pt)
          pow((double)pt1.y - (double)pt0.y, 2))
 
     // Update the total distance traveled
+    long double distPrev = distance;
     if (ptPrev.x != 0 || ptPrev.y != 0) {
         double delta = DIST(ptPrev, pt);
         distance += delta;
@@ -267,8 +268,10 @@ void LLNewPos(POINT pt)
     double averagePrev = averageSpeed;
     averageSpeed = (int)(distance / ++steps);
 
-    // Whenever the average speed changes by .01, repaint the window
-    if(abs(averageSpeed - averagePrev) >= .01) {
+    // Repaint the window if something has changed enough to effect
+    // a number displayed somewhere on the window
+    if(abs(averageSpeed - averagePrev) >= .01 ||
+        abs(distPrev - distance) > 1000) {
         InvalidateRect(hwnd, NULL, TRUE);
     }
 }
