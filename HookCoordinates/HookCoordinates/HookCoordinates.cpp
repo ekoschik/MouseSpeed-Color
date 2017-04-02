@@ -3,7 +3,7 @@
 #include <Windows.h>
 #include <Windowsx.h>
 #include <cmath>
-
+#include <float.h>
 HHOOK hMouseHook;
 DWORD threadID;
 HWND hwnd;
@@ -11,19 +11,22 @@ HWND hwnd;
 const double goal = 300; // 'top' average distance per mouse move
 
 POINT ptPrev = {};
-double distance = 0;
+long double distance = 0;
 double maxDelta = 0;
 int steps = 0;
 int averageSpeed = 0;
 
-COLORREF Interpolate(int percentage)
+COLORREF GetAccumulateAvgSpeedColor()
 {
-    // Magic voodoo code adapted from something I found on the internet
+    // Calculate the average speed as a percentage of the goal
+    int percentage = max(0, min(100,
+        (int)(((double)averageSpeed / goal) * 100)));
 
     static const COLORREF rgbMin = RGB(0, 0, 255);       // blue
     static const COLORREF rgbMiddle = RGB(255, 255, 0);  // yellow
     static const COLORREF rgbMax = RGB(255, 0, 0);       // red
 
+    // Adapted from magic online code...
     COLORREF c1 = (percentage < 50) ? rgbMin : rgbMiddle;
     COLORREF c2 = (percentage < 50) ? rgbMiddle : rgbMax;
     double fraction = (percentage < 50) ?
@@ -31,23 +34,17 @@ COLORREF Interpolate(int percentage)
 
 #define CLRMATH(d1,d2,f) (int)(d1 + (d2 - d1) * (double)f)
     return RGB(CLRMATH((double)GetRValue(c1), (double)GetRValue(c2), fraction),
-               CLRMATH((double)GetGValue(c1), (double)GetGValue(c2), fraction), 
-               CLRMATH((double)GetBValue(c1), (double)GetBValue(c2), fraction));
-
-    // http://stackoverflow.com/questions/6394304/algorithm-how-do-i-fade-from-red-to-green-via-yellow-using-rgb-values
+        CLRMATH((double)GetGValue(c1), (double)GetGValue(c2), fraction),
+        CLRMATH((double)GetBValue(c1), (double)GetBValue(c2), fraction));
 }
 
 void Draw(HDC hdc, HWND hwnd)
 {
     RECT rcClient = {};
     GetClientRect(hwnd, &rcClient);
-
-    // Calculate the average speed as a percentage of the goal
-    int percentage = max(0, min(100,
-        (int)(((double)averageSpeed / goal) * 100)));
-
-    // Fill the client area with 'the Interpolate color'
-    HBRUSH hbr = CreateSolidBrush(Interpolate(percentage));
+    
+    // Fill the client area with 'avg speed color'
+    HBRUSH hbr = CreateSolidBrush(GetAccumulateAvgSpeedColor());
     FillRect(hdc, &rcClient, hbr);
 }
 
@@ -182,7 +179,7 @@ int main()
     PostThreadMessage(threadID, WM_QUIT, 0, 0);
     WaitForSingleObject(hthread, INFINITE);
 
-    printf("exiting.\n");
+    printf("exiting. Total distance traveled: %.0Lf\n", distance);
     return 0;
 }
 
