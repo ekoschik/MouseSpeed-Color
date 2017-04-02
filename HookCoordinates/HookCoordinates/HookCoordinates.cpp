@@ -245,7 +245,10 @@ DWORD WINAPI LLMouseHookThread(void* /*data*/)
     return 0;
 }
 
-int main()
+int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
+    _In_opt_ HINSTANCE hPrevInstance,
+    _In_ LPWSTR    lpCmdLine,
+    _In_ int       nCmdShow)
 {
     HANDLE hthread = CreateThread(NULL, 0, LLMouseHookThread, NULL, 0, NULL);
     if (!hthread) {
