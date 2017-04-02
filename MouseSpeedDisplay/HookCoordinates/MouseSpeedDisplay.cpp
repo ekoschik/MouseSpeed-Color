@@ -171,7 +171,7 @@ LRESULT CALLBACK WndProc(
 
         // Update bHoverCloseButton and repaint if it changed
         bool bHovPrev = bHoverCloseButton;
-        bHoverCloseButton = PtInRect(&rcCloseButton, pt);
+        bHoverCloseButton = !!PtInRect(&rcCloseButton, pt);
         if (bHoverCloseButton != bHovPrev) {
             InvalidateRect(hwnd, NULL, TRUE);
         }
@@ -197,8 +197,8 @@ LRESULT CALLBACK WndProc(
                 POINT ptCursor = { GET_X_LPARAM(lParam) , GET_Y_LPARAM(lParam) };
                 int speed = 4;
                 GrowShrink((accum > 0) ? speed : -speed, ptCursor,
-                    GET_KEYSTATE_WPARAM(wParam) & MK_CONTROL,
-                    GET_KEYSTATE_WPARAM(wParam) & MK_SHIFT);
+                    !!(GET_KEYSTATE_WPARAM(wParam) & MK_CONTROL),
+                    !!(GET_KEYSTATE_WPARAM(wParam) & MK_SHIFT));
                 accum = 0;
             }
         }
