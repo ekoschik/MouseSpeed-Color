@@ -142,21 +142,44 @@ LRESULT CALLBACK mouseProc(int nCode, WPARAM wParam, LPARAM lParam)
     return CallNextHookEx(hMouseHook, nCode, wParam, lParam);
 }
 
-int main()
+DWORD threadID;
+DWORD WINAPI LLMouseHookThread(void* /*data*/)
 {
+    threadID = GetCurrentThreadId();
+
     HINSTANCE hinst = GetModuleHandle(NULL);
     hMouseHook = SetWindowsHookEx(
         WH_MOUSE_LL, mouseProc, hinst, NULL);
-    
-    if(InitWindow(hinst)) {
-        MSG msg;
-        while (GetMessage(&msg, NULL, 0, 0)) {
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
-        }
+
+    MSG msg;
+    while (GetMessage(&msg, NULL, 0, 0)) {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
     }
 
     UnhookWindowsHookEx(hMouseHook);
+    return 0;
+}
+
+
+int main()
+{
+    HANDLE hthread = CreateThread(NULL, 0, LLMouseHookThread, NULL, 0, NULL);
+    if (!hthread) {
+        printf("CreateThread failed.\n");
+        return 1;
+    }
+    
+    if (!InitWindow(GetModuleHandle(NULL))) {
+        return 1;
+    }
+
+    MSG msg;
+    while (GetMessage(&msg, NULL, 0, 0)) {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+    
     return 0;
 }
 
