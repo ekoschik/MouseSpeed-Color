@@ -5,6 +5,7 @@
 #include <cmath>
 #include <float.h>
 
+HINSTANCE hInst;
 HHOOK hMouseHook;
 DWORD threadID;
 HWND hwnd;
@@ -25,6 +26,9 @@ double maxDelta = 0;
 int steps = 0;
 int averageSpeed = 0;
 
+RECT rcCloseButton = {};
+bool bHoverCloseButton = false;
+
 void PrintText(HDC hdc, RECT rcClient, int percentage)
 {
     WCHAR buf[100];
@@ -41,19 +45,34 @@ void PrintText(HDC hdc, RECT rcClient, int percentage)
     static HFONT hfontLarge = CreateFont(
         45, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, L"TimesNewRoman");
     static HFONT hfontSmall = CreateFont(
-        15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, L"TimesNewRoman");
+        20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, L"TimesNewRoman");
+
+    RECT rcTxt = rcClient;
 
     SelectFont(hdc, hfontLarge);
-    PRINT_CENTER(&rcClient, L"%i%%", percentage);
+    PRINT_CENTER(&rcTxt, L"%i%%", percentage);
 
     SelectFont(hdc, hfontSmall);
-    int inc = 15;
-    rcClient.top = rcClient.bottom - (3* inc);
-    rcClient.left += inc;
+    int inc = 20;
+    rcTxt.top = rcTxt.bottom - (3* inc);
+    rcTxt.left += inc;
 
-    PRINT_LEFT(&rcClient, L"average speed: %i (/%i)", averageSpeed, (int)goal);
-    rcClient.top += inc;
-    PRINT_LEFT(&rcClient, L"total distance: %i", (int)distance);
+    PRINT_LEFT(&rcTxt, L"average speed: %i (/%i)", averageSpeed, (int)goal);
+    rcTxt.top += inc;
+    PRINT_LEFT(&rcTxt, L"total distance: %i", (int)distance);
+
+    SetRect(&rcTxt, rcClient.right - 80,
+                    rcClient.top + 8,
+                    rcClient.right - 8,
+                    rcClient.top + 8 + 25);
+    CopyRect(&rcCloseButton, &rcTxt);
+
+    if (bHoverCloseButton) {
+        static HBRUSH hbrCloseHover = CreateSolidBrush(RGB(66, 244, 212));
+        FillRect(hdc, &rcTxt, hbrCloseHover);
+    }
+    PRINT_CENTER(&rcTxt, L"close");
+
 }
 
 COLORREF GetAvgSpeedColor(int percentage)
@@ -133,9 +152,29 @@ LRESULT CALLBACK WndProc(
         break;
     }
 
-    // Let the user drag the window from anywhere
     case WM_NCHITTEST:
-        return HTCAPTION;
+    {
+        // Get cursor pos in client coordinates
+        POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        ScreenToClient(hwnd, &pt);
+
+        // Update bHoverCloseButton and repaint if it changed
+        bool bHovPrev = bHoverCloseButton;
+        bHoverCloseButton = PtInRect(&rcCloseButton, pt);
+        if (bHoverCloseButton != bHovPrev) {
+            InvalidateRect(hwnd, NULL, TRUE);
+        }
+
+        // If we're over the client area, and not over the close button,
+        // pretend this is the caption area (to let the user drag the window)
+        LRESULT res = DefWindowProc(hwnd, message, wParam, lParam);
+        if (res == HTCLIENT && !bHoverCloseButton) {
+            res = HTCAPTION;
+        }
+
+        return res;
+    }
+
 
     // Scrolling + control/shift adjust the window's width/height
     case WM_MOUSEWHEEL:
@@ -154,6 +193,14 @@ LRESULT CALLBACK WndProc(
         }
         break;
 
+    case WM_LBUTTONUP:
+        if (!bHoverCloseButton) {
+            break;
+        }
+
+        // Button up on the close button, exit.
+        __fallthrough;
+
     case WM_DESTROY:
         PostQuitMessage(0);
         break;
@@ -162,7 +209,7 @@ LRESULT CALLBACK WndProc(
     return DefWindowProc(hwnd, message, wParam, lParam);
 }
 
-bool InitWindow(HINSTANCE hinst)
+bool InitWindow()
 {
     LPCWSTR szWndClass = L"class", szWndTitle = L"title";
 
@@ -170,7 +217,7 @@ bool InitWindow(HINSTANCE hinst)
     wcex.cbSize = sizeof(WNDCLASSEX);
     wcex.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
     wcex.lpfnWndProc = WndProc;
-    wcex.hInstance = hinst;
+    wcex.hInstance = hInst;
     wcex.hCursor = LoadCursor(nullptr, IDC_ARROW);
     wcex.lpszClassName = szWndClass;
     if (!RegisterClassEx(&wcex)) {
@@ -182,7 +229,7 @@ bool InitWindow(HINSTANCE hinst)
         szWndTitle,
         WS_POPUPWINDOW,
         500,500, defCX, defCY,
-        NULL, nullptr, hinst, nullptr);
+        NULL, nullptr, hInst, nullptr);
 
     if (!hwnd) {
         return false;
@@ -194,7 +241,7 @@ bool InitWindow(HINSTANCE hinst)
 
 void LLNewPos(POINT pt)
 {
-#define DIST(pt0, pt1) \
+    #define DIST(pt0, pt1) \
     sqrt(pow((double)pt1.x - (double)pt0.x, 2) + \
     pow((double)pt1.y - (double)pt0.y, 2))
 
@@ -225,13 +272,12 @@ LRESULT CALLBACK LLMouseHook(int nCode, WPARAM wParam, LPARAM lParam)
     return CallNextHookEx(hMouseHook, nCode, wParam, lParam);
 }
 
-DWORD WINAPI LLMouseHookThread(void* /*data*/)
+DWORD WINAPI LLMouseHookThread(void*)
 {
     threadID = GetCurrentThreadId();
 
-    HINSTANCE hinst = GetModuleHandle(NULL);
     hMouseHook = SetWindowsHookEx(
-        WH_MOUSE_LL, LLMouseHook, hinst, NULL);
+        WH_MOUSE_LL, LLMouseHook, hInst, NULL);
 
     MSG msg;
     while (GetMessage(&msg, NULL, 0, 0)) {
@@ -243,24 +289,26 @@ DWORD WINAPI LLMouseHookThread(void* /*data*/)
     return 0;
 }
 
-int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
-    _In_opt_ HINSTANCE hPrevInstance,
-    _In_ LPWSTR    lpCmdLine,
-    _In_ int       nCmdShow)
+int APIENTRY wWinMain(
+    _In_ HINSTANCE hInstance,
+    _In_opt_ HINSTANCE /*hPrevInstance*/,
+    _In_ LPWSTR    /*lpCmdLine*/,
+    _In_ int       /*nCmdShow*/)
 {
+    hInst = hInstance;
+
+    // Start worker thread
     HANDLE hthread = CreateThread(NULL, 0, LLMouseHookThread, NULL, 0, NULL);
     if (!hthread) {
         return 1;
     }
-    
-    if (!InitWindow(GetModuleHandle(NULL))) {
-        return 1;
-    }
 
-    MSG msg;
-    while (GetMessage(&msg, NULL, 0, 0)) {
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
+    if (InitWindow()) {
+        MSG msg;
+        while (GetMessage(&msg, NULL, 0, 0)) {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
     }
 
     // Stop worker thread and wait for it to finish
