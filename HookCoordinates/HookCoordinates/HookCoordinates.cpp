@@ -1,67 +1,53 @@
 
 #include "stdafx.h"
 #include <Windows.h>
+#include <Windowsx.h>
 #include <cmath>
 
+HHOOK hMouseHook;
+DWORD threadID;
 HWND hwnd;
+
+const double goal = 300; // 'top' average distance per mouse move
+
 POINT ptPrev = {};
 double distance = 0;
 double maxDelta = 0;
-const double goal = 500;
 int steps = 0;
+int averageSpeed = 0;
 
-void TickSteps()
+COLORREF Interpolate(int percentage)
 {
-    steps++;
-    if (steps % 10) {
-        InvalidateRect(hwnd, NULL, TRUE);
-    }
-}
+    // Magic voodoo code adapted from something I found on the internet
 
-double GetSpeedPercentage()
-{
-    int averageSpeed = (int)(distance / steps);
-    return (averageSpeed > goal) ? 1 : (double)(averageSpeed / goal);
-}
+    static const COLORREF rgbMin = RGB(0, 0, 255);       // blue
+    static const COLORREF rgbMiddle = RGB(255, 255, 0);  // yellow
+    static const COLORREF rgbMax = RGB(255, 0, 0);       // red
 
-COLORREF rgbMin = RGB(0, 0, 255);
-COLORREF rgbMiddle = RGB(255, 255, 0);
-COLORREF rgbMax = RGB(255, 0, 0);
+    COLORREF c1 = (percentage < 50) ? rgbMin : rgbMiddle;
+    COLORREF c2 = (percentage < 50) ? rgbMiddle : rgbMax;
+    double fraction = (percentage < 50) ?
+        percentage / 50.0 : (percentage - 50) / 50.0;
 
-double InterpolateHelper(double d1, double d2, double fraction)
-{
-    return d1 + (d2 - d1) * fraction;
-}
+#define CLRMATH(d1,d2,f) (int)(d1 + (d2 - d1) * (double)f)
+    return RGB(CLRMATH((double)GetRValue(c1), (double)GetRValue(c2), fraction),
+               CLRMATH((double)GetGValue(c1), (double)GetGValue(c2), fraction), 
+               CLRMATH((double)GetBValue(c1), (double)GetBValue(c2), fraction));
 
-COLORREF Interpolate(COLORREF c1, COLORREF c2, double fraction)
-{
-    double r = InterpolateHelper(GetRValue(c1), GetRValue(c2), fraction);
-    double g = InterpolateHelper(GetGValue(c1), GetGValue(c2), fraction);
-    double b = InterpolateHelper(GetBValue(c1), GetBValue(c2), fraction);
-    
-    //printf("Interpolate(fraction: %.2f, returning RGB(%i, %i, %i)\n",
-    //    fraction, (int)r, (int)g, (int)b);
-    return RGB((int)r, (int)g, (int)b);
-}
-
-COLORREF GetPercentageColor()
-{
-    if (steps == 0) return rgbMin;
-
-    double percentage = GetSpeedPercentage();
-    printf("percentage: %.2f... \n", percentage);
-
-    return (percentage < 50) ?
-        Interpolate(rgbMax, rgbMiddle, percentage / 50.0) :
-        Interpolate(rgbMiddle, rgbMin, (percentage - 50) / 50.0);
+    // http://stackoverflow.com/questions/6394304/algorithm-how-do-i-fade-from-red-to-green-via-yellow-using-rgb-values
 }
 
 void Draw(HDC hdc, HWND hwnd)
 {
-    RECT rcClient;
+    RECT rcClient = {};
     GetClientRect(hwnd, &rcClient);
 
-    HBRUSH hbr = CreateSolidBrush(GetPercentageColor());
+    // Calculate the average speed as a percentage of the goal
+    int percentage = max(0, min(100,
+        (int)(((double)averageSpeed / goal) * 100)));
+
+    // Fill the client area with 'the Interpolate color'
+    HBRUSH hbr = CreateSolidBrush(Interpolate(percentage));
     FillRect(hdc, &rcClient, hbr);
 }
 
@@ -85,6 +71,7 @@ LRESULT CALLBACK WndProc(
         PostQuitMessage(0);
         break;
     }
+
     return DefWindowProc(hwnd, message, wParam, lParam);
 }
 
@@ -121,35 +108,46 @@ bool InitWindow(HINSTANCE hinst)
     return true;
 }
 
-HHOOK hMouseHook;
-
-LRESULT CALLBACK mouseProc(int nCode, WPARAM wParam, LPARAM lParam)
+void LLNewPos(POINT pt)
 {
 #define DIST(pt0, pt1) \
     sqrt(pow((double)pt1.x - (double)pt0.x, 2) + \
     pow((double)pt1.y - (double)pt0.y, 2))
 
+    // Update the total distance traveled
+    if (ptPrev.x != 0 || ptPrev.y != 0) {
+        double delta = DIST(ptPrev, pt);
+        distance += delta;
+    }
+    ptPrev = pt;
+
+    // Incrememnt steps and recompute average speed
+    double averagePrev = averageSpeed;
+    averageSpeed = (int)(distance / ++steps);
+
+    // Whenever the average speed changes by .01, repaint the window
+    if ((int)(averageSpeed * 100) != (int)(averagePrev * 100)) {
+        InvalidateRect(hwnd, NULL, TRUE);
+    }
+}
+
+LRESULT CALLBACK LLMouseHook(int nCode, WPARAM wParam, LPARAM lParam)
+{
     MOUSEHOOKSTRUCT * pLLhook = (MOUSEHOOKSTRUCT *)lParam;
     if(wParam == WM_MOUSEMOVE && pLLhook) {
-        if (ptPrev.x != 0 || ptPrev.y != 0) {
-            double delta = DIST(ptPrev, pLLhook->pt);
-            distance += delta;
-        }
-        TickSteps();
-        ptPrev = pLLhook->pt;
+        LLNewPos(pLLhook->pt);
     }
 
     return CallNextHookEx(hMouseHook, nCode, wParam, lParam);
 }
 
-DWORD threadID;
 DWORD WINAPI LLMouseHookThread(void* /*data*/)
 {
     threadID = GetCurrentThreadId();
 
     HINSTANCE hinst = GetModuleHandle(NULL);
     hMouseHook = SetWindowsHookEx(
-        WH_MOUSE_LL, mouseProc, hinst, NULL);
+        WH_MOUSE_LL, LLMouseHook, hinst, NULL);
 
     MSG msg;
     while (GetMessage(&msg, NULL, 0, 0)) {
@@ -158,9 +156,9 @@ DWORD WINAPI LLMouseHookThread(void* /*data*/)
     }
 
     UnhookWindowsHookEx(hMouseHook);
+    printf("worker thread exiting.\n");
     return 0;
 }
-
 
 int main()
 {
@@ -179,7 +177,12 @@ int main()
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
-    
+
+    // Stop worker thread and wait for it to finish
+    PostThreadMessage(threadID, WM_QUIT, 0, 0);
+    WaitForSingleObject(hthread, INFINITE);
+
+    printf("exiting.\n");
     return 0;
 }
 
