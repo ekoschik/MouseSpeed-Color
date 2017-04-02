@@ -148,6 +148,36 @@ void GrowShrink(int delta, POINT ptCursor, bool control, bool shift)
     InvalidateRect(hwnd, NULL, TRUE);
 }
 
+bool CheckMoveToMonitorCorner(int x, int y, WINDOWPOS* pwp, POINT ptCursor)
+{
+    RECT rc = { x, y, x + pwp->cx, y + pwp->cy };
+    if (PtInRect(&rc, ptCursor)) {
+        pwp->x = rc.left;
+        pwp->y = rc.top;
+        return true;
+    }
+
+    return false;
+}
+
+bool AdjustPosChangingRect(WINDOWPOS* pwp, HWND hwnd)
+{
+    MONITORINFO mi;
+    mi.cbSize = sizeof(MONITORINFO);
+    if (!GetMonitorInfo(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi)) {
+        return false;
+    }
+    RECT rcWork = mi.rcWork;
+
+    POINT ptCursor;
+    GetCursorPos(&ptCursor);
+
+    return CheckMoveToMonitorCorner(rcWork.left, rcWork.top, pwp, ptCursor) ||
+           CheckMoveToMonitorCorner(rcWork.right - pwp->cx, rcWork.top, pwp, ptCursor) ||
+           CheckMoveToMonitorCorner(rcWork.right - pwp->cx, rcWork.bottom - pwp->cy, pwp, ptCursor) ||
+           CheckMoveToMonitorCorner(rcWork.left, rcWork.bottom - pwp->cy, pwp, ptCursor);
+}
+
 LRESULT CALLBACK WndProc(
     HWND hwnd,
     UINT message,
@@ -187,6 +217,10 @@ LRESULT CALLBACK WndProc(
         return res;
     }
 
+    case WM_WINDOWPOSCHANGING:
+        if(AdjustPosChangingRect((WINDOWPOS*)lParam, hwnd)) {
+            break;
+        }
 
     // Scrolling + control/shift adjust the window's width/height
     case WM_MOUSEWHEEL:
