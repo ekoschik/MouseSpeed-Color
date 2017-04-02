@@ -116,7 +116,7 @@ void Draw(HDC hdc, HWND hwnd)
 __inline VOID ResizeRectAroundPoint(PRECT prc, UINT cx, UINT cy, POINT pt)
 {
     prc->left = pt.x - MulDiv(pt.x - prc->left, cx, prc->right - prc->left);
-    prc->top = pt.y - MulDiv(pt.y - prc->top, cy, (prc->bottom - prc->top));
+    prc->top = pt.y - MulDiv(pt.y - prc->top, cy, prc->bottom - prc->top);
     prc->right = prc->left + cx;
     prc->bottom = prc->top + cy;
 }
@@ -150,6 +150,8 @@ void GrowShrink(int delta, POINT ptCursor, bool control, bool shift)
 
 bool CheckMoveToMonitorCorner(int x, int y, WINDOWPOS* pwp, POINT ptCursor)
 {
+    // If the window at this origin and the current size still is under
+    // the monitor, adjust the POSCHANGING origin and return true.
     RECT rc = { x, y, x + pwp->cx, y + pwp->cy };
     if (PtInRect(&rc, ptCursor)) {
         pwp->x = rc.left;
@@ -162,6 +164,12 @@ bool CheckMoveToMonitorCorner(int x, int y, WINDOWPOS* pwp, POINT ptCursor)
 
 bool AdjustPosChangingRect(WINDOWPOS* pwp, HWND hwnd)
 {
+    // If shift is down, skip snap to corner
+    if ((GetKeyState(VK_SHIFT)) >> 15) {
+        return false;
+    }
+
+    // Get current monitor work area
     MONITORINFO mi;
     mi.cbSize = sizeof(MONITORINFO);
     if (!GetMonitorInfo(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi)) {
@@ -169,9 +177,11 @@ bool AdjustPosChangingRect(WINDOWPOS* pwp, HWND hwnd)
     }
     RECT rcWork = mi.rcWork;
 
+    // Get current cursor position
     POINT ptCursor;
     GetCursorPos(&ptCursor);
 
+    // Check each corner, stopping if one causes us to snap the window
     return CheckMoveToMonitorCorner(rcWork.left, rcWork.top, pwp, ptCursor) ||
            CheckMoveToMonitorCorner(rcWork.right - pwp->cx, rcWork.top, pwp, ptCursor) ||
            CheckMoveToMonitorCorner(rcWork.right - pwp->cx, rcWork.bottom - pwp->cy, pwp, ptCursor) ||
@@ -306,7 +316,7 @@ void LLNewPos(POINT pt)
     // Repaint the window if something has changed enough to effect
     // a number displayed somewhere on the window
     if(abs(averageSpeed - averagePrev) >= .01 ||
-        abs(distPrev - distance) > 1000) {
+        abs(distance - distPrev) > 500) {
         InvalidateRect(hwnd, NULL, TRUE);
     }
 }
