@@ -174,7 +174,6 @@ bool InitWindow(HINSTANCE hinst)
     wcex.hCursor = LoadCursor(nullptr, IDC_ARROW);
     wcex.lpszClassName = szWndClass;
     if (!RegisterClassEx(&wcex)) {
-        printf("Failed to register window class!\n");
         return false;
     }
 
@@ -186,7 +185,6 @@ bool InitWindow(HINSTANCE hinst)
         NULL, nullptr, hinst, nullptr);
 
     if (!hwnd) {
-        printf("Failed to create window!\n");
         return false;
     }
 
@@ -252,7 +250,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 {
     HANDLE hthread = CreateThread(NULL, 0, LLMouseHookThread, NULL, 0, NULL);
     if (!hthread) {
-        printf("CreateThread failed.\n");
         return 1;
     }
     
@@ -269,8 +266,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     // Stop worker thread and wait for it to finish
     PostThreadMessage(threadID, WM_QUIT, 0, 0);
     WaitForSingleObject(hthread, INFINITE);
-
-    printf("exiting, total distance traveled: %.0Lf px\n", distance);
     return 0;
 }
 
