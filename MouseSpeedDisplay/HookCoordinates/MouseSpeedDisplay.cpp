@@ -129,6 +129,17 @@ __inline VOID ResizeRectAroundPoint(PRECT prc, UINT cx, UINT cy, POINT pt)
     prc->bottom = prc->top + cy;
 }
 
+void SWP(HWND hwnd, RECT rc)
+{
+    SetWindowPos(hwnd, 0,
+        rc.left, rc.top,
+        rc.right - rc.left,
+        rc.bottom - rc.top,
+        SWP_SHOWWINDOW);
+
+    InvalidateRect(hwnd, NULL, TRUE);
+}
+
 void GrowShrink(int delta, POINT ptCursor, bool control, bool shift)
 {
     if (!control && !shift) {
@@ -147,13 +158,7 @@ void GrowShrink(int delta, POINT ptCursor, bool control, bool shift)
         ResizeRectAroundPoint(&rcWindow, cx, cy, ptCursor);
     }
 
-    SetWindowPos(hwnd, 0,
-        rcWindow.left, rcWindow.top,
-        rcWindow.right - rcWindow.left,
-        rcWindow.bottom - rcWindow.top,
-        SWP_FRAMECHANGED);
-
-    InvalidateRect(hwnd, NULL, TRUE);
+    SWP(hwnd, rcWindow);
 }
 
 bool CheckMoveToMonitorCorner(int x, int y, WINDOWPOS* pwp, POINT ptCursor)
@@ -170,30 +175,52 @@ bool CheckMoveToMonitorCorner(int x, int y, WINDOWPOS* pwp, POINT ptCursor)
     return false;
 }
 
+RECT GetWorkArea(HWND hwnd)
+{
+    MONITORINFO mi;
+    mi.cbSize = sizeof(MONITORINFO);
+    GetMonitorInfo(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi);
+    return mi.rcWork;
+}
+
+bool bTrackSizeMove = false;
+
 bool AdjustPosChangingRect(WINDOWPOS* pwp, HWND hwnd)
 {
     // If shift is down, skip snap to corner
-    if ((GetKeyState(VK_SHIFT)) >> 15) {
+    if (bTrackSizeMove && ((GetKeyState(VK_SHIFT)) >> 15)) {
         return false;
     }
 
-    // Get current monitor work area
-    MONITORINFO mi;
-    mi.cbSize = sizeof(MONITORINFO);
-    if (!GetMonitorInfo(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi)) {
-        return false;
-    }
-    RECT rcWork = mi.rcWork;
-
-    // Get current cursor position
     POINT ptCursor;
     GetCursorPos(&ptCursor);
+    RECT rcWork = GetWorkArea(hwnd);
 
     // Check each corner, stopping if one causes us to snap the window
     return CheckMoveToMonitorCorner(rcWork.left, rcWork.top, pwp, ptCursor) ||
            CheckMoveToMonitorCorner(rcWork.right - pwp->cx, rcWork.top, pwp, ptCursor) ||
            CheckMoveToMonitorCorner(rcWork.right - pwp->cx, rcWork.bottom - pwp->cy, pwp, ptCursor) ||
            CheckMoveToMonitorCorner(rcWork.left, rcWork.bottom - pwp->cy, pwp, ptCursor);
+}
+
+void CenterWindow(HWND hwnd)
+{
+    RECT rcWork = GetWorkArea(hwnd);
+    POINT ptCenter = {
+        (rcWork.right - rcWork.left) / 2 + rcWork.left,
+        (rcWork.bottom - rcWork.top) / 2 + rcWork.top };
+    RECT rcWindow;
+    GetWindowRect(hwnd, &rcWindow);
+    int cx = rcWindow.right - rcWindow.left;
+    int cy = rcWindow.bottom - rcWindow.top;
+
+    RECT rc = {
+        ptCenter.x - (cx / 2),
+        ptCenter.y - (cy / 2),
+        ptCenter.x + (cx / 2),
+        ptCenter.y + (cy / 2) };
+
+    SWP(hwnd, rc);
 }
 
 LRESULT CALLBACK WndProc(
@@ -204,6 +231,12 @@ LRESULT CALLBACK WndProc(
 {
     switch (message)
     {
+    case WM_CREATE:
+    {
+        CenterWindow(hwnd);
+        break;
+    }
+
     case WM_PAINT:
     {
         PAINTSTRUCT ps;
@@ -256,6 +289,10 @@ LRESULT CALLBACK WndProc(
         break;
     }
     
+    case WM_ENTERSIZEMOVE:
+    case WM_EXITSIZEMOVE:
+        bTrackSizeMove = (message == WM_ENTERSIZEMOVE);
+        break;
     case WM_LBUTTONUP:
         if (!bHoverCloseButton) {
             break;
