@@ -22,10 +22,13 @@ COLORREF rgbMax = RGB(255, 0, 0);       // red (fastest)
 
 // Bookkeeping
 POINT ptPrev = {};
-long double distance = 0;
-double maxDelta = 0;
+const int distDivBy = 1000;
+double maxDistance = 0;
 int steps = 0;
+
+long double distance = 0;
 int averageSpeed = 0;
+int percentage = 0;
 
 // Position and 'hover state' of close button
 RECT rcCloseButton = {};
@@ -46,16 +49,38 @@ COLORREF GetAvgSpeedColor(int percentage)
                CLRMATH((double)GetBValue(c1), (double)GetBValue(c2), fraction));
 }
 
+HBRUSH GetBrushForPercentage()
+{
+#define CACHESIZE 10
+    static HBRUSH hbrCache[CACHESIZE];
+    static int iPercentageCache[CACHESIZE];
+    static int iCachecPtr = -1;
+
+    if (iCachecPtr > 0 && iPercentageCache[iCachecPtr] == percentage) {
+        return hbrCache[iCachecPtr];
+    }
+
+    if (iCachecPtr > 0) {
+        for (int i = 0; i < CACHESIZE; i++) {
+            if (iPercentageCache[i] == percentage) {
+                return hbrCache[i];
+            }
+        }
+    }
+
+    iCachecPtr = (iCachecPtr + 1) % CACHESIZE;
+    DeleteObject(hbrCache[iCachecPtr]);
+    hbrCache[iCachecPtr] = CreateSolidBrush(GetAvgSpeedColor(percentage));
+    return hbrCache[iCachecPtr];
+}
+
 void Draw(HDC hdc, HWND hwnd)
 {
     RECT rcClient = {};
     GetClientRect(hwnd, &rcClient);
 
-    // Calculate the current average speed as a percentage of the goal
-    int percentage = (int)(((double)averageSpeed / goal) * 100);
-
     // Fill the client area with 'avg speed color'
-    HBRUSH hbr = CreateSolidBrush(GetAvgSpeedColor(percentage));
+    HBRUSH hbr = GetBrushForPercentage();
     FillRect(hdc, &rcClient, hbr);
 
     WCHAR buf[100];
@@ -70,8 +95,8 @@ void Draw(HDC hdc, HWND hwnd)
     SetBkMode(hdc, TRANSPARENT);
 
 #define FONT_NAME   \
-    L"Comic Sans MS"
-    //L"Courier New"
+    L"Courier New"
+    //L"Comic Sans MS"
     //L"Arial Black"
     //L"Consolas"
 
@@ -79,25 +104,28 @@ void Draw(HDC hdc, HWND hwnd)
         45, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, FONT_NAME);
     static HFONT hfontSmall = CreateFont(
         20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, FONT_NAME);
+    
+    int inc = 20;
+    int bottomtextarea = (3 * inc);
 
     // Large text in the center for percentage
 
     SelectFont(hdc, hfontLarge);
     RECT rcTxt = rcClient;
+    rcTxt.bottom = rcTxt.bottom - bottomtextarea;
     PRINT_CENTER(&rcTxt, L"%i%%", percentage);
 
     // Small text in bottom left for avg speed and distance
 
     SelectFont(hdc, hfontSmall);
 
-    int inc = 20;
-    rcTxt.top = rcTxt.bottom - (3 * inc);
+    CopyRect(&rcTxt, &rcClient);
+    rcTxt.top = rcTxt.bottom - bottomtextarea;
     rcTxt.left += inc;
 
     PRINT_LEFT(&rcTxt, L"average speed: %i, top speed: %i",
-        averageSpeed, (int)maxDelta);
+        averageSpeed, (int)maxDistance);
     rcTxt.top += inc;
-    const int distDivBy = 1000;
     PRINT_LEFT(&rcTxt, L"total distance: %i (x%i px)",
         (int)(distance / distDivBy), distDivBy);
 
@@ -161,10 +189,17 @@ void GrowShrink(int delta, POINT ptCursor, bool control, bool shift)
     SWP(hwnd, rcWindow);
 }
 
+
+RECT GetWorkArea(HWND hwnd)
+{
+    MONITORINFO mi;
+    mi.cbSize = sizeof(MONITORINFO);
+    GetMonitorInfo(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi);
+    return mi.rcWork;
+}
+
 bool CheckMoveToMonitorCorner(int x, int y, WINDOWPOS* pwp, POINT ptCursor)
 {
-    // If the window at this origin and the current size still is under
-    // the monitor, adjust the POSCHANGING origin and return true.
     RECT rc = { x, y, x + pwp->cx, y + pwp->cy };
     if (PtInRect(&rc, ptCursor)) {
         pwp->x = rc.left;
@@ -173,14 +208,6 @@ bool CheckMoveToMonitorCorner(int x, int y, WINDOWPOS* pwp, POINT ptCursor)
     }
 
     return false;
-}
-
-RECT GetWorkArea(HWND hwnd)
-{
-    MONITORINFO mi;
-    mi.cbSize = sizeof(MONITORINFO);
-    GetMonitorInfo(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi);
-    return mi.rcWork;
 }
 
 bool bTrackSizeMove = false;
@@ -341,28 +368,35 @@ bool InitWindow()
 
 void LLNewPos(POINT pt)
 {
-#define DIST(pt0, pt1) \
-    sqrt(pow((double)pt1.x - (double)pt0.x, 2) + \
-         pow((double)pt1.y - (double)pt0.y, 2))
-
-    // Update the total distance traveled
     long double distPrev = distance;
     if (ptPrev.x != 0 || ptPrev.y != 0) {
-        double delta = DIST(ptPrev, pt);
+        double delta = sqrt(
+            pow((double)pt.x - (double)ptPrev.x, 2) + \
+            pow((double)pt.y - (double)ptPrev.y, 2));
         distance += delta;
-        maxDelta = max(maxDelta, delta);
+        maxDistance = max(maxDistance, delta);
     }
     ptPrev = pt;
 
-    // Incrememnt steps and recompute average speed
-    double averagePrev = averageSpeed;
     averageSpeed = (int)(distance / ++steps);
+    percentage = (int)(((double)averageSpeed / goal) * 100);
 
-    // Repaint the window if something has changed enough to effect
-    // a number displayed somewhere on the window
-    if(abs(averageSpeed - averagePrev) >= .01 ||
-        abs(distance - distPrev) > 500) {
+    static int distanceLastUpdate = 0;
+    static int percentageLastUpdate = 0;
+    static int averageSpeedLastUpdate = 0;
+    static int maxDistanceLastUpdate = 0;
+
+    if (distanceLastUpdate != (int)(distance / distDivBy) ||
+        percentageLastUpdate != percentage ||
+        averageSpeedLastUpdate != averageSpeed ||
+        maxDistanceLastUpdate != maxDistance) {
+
         InvalidateRect(hwnd, NULL, TRUE);
+
+        distanceLastUpdate = (int)(distance / distDivBy);
+        percentageLastUpdate = percentage;
+        averageSpeedLastUpdate = averageSpeed;
+        maxDistanceLastUpdate = maxDistance;
     }
 }
 
